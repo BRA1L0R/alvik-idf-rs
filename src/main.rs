@@ -147,6 +147,11 @@ impl AlvikDriver {
 
         let serial = AlvikSerial::spawn(uart);
 
+        serial
+            .send_channel
+            .try_send(Message::SetLed { value: 0xFF })
+            .unwrap();
+
         block_on(async move {
             let mut received = 0;
             loop {

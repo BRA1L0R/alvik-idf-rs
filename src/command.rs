@@ -106,6 +106,7 @@ macro_rules! impl_message {
 }
 
 impl_message! {
+    // Body -> Brain
     b'j' => WheelSpeed { left: f32, right: f32 },
     b'l' => LineSensor { left_line: u16, center_line: u16, right_line: u16 },
     b'c' => ColorSensor { red: u16, green: u16, blue: u16 },
@@ -121,8 +122,10 @@ impl_message! {
     b'v' => Velocity { linear: f32, angular: f32 },
     b'x' => AckU8 { ack: u8 },
     b'z' => AckF32 { x: f32, y: f32, theta: f32 },
-    0x7E => FirmwareVersion { value: [u8; 3] }
+    0x7E => FirmwareVersion { value: [u8; 3] },
 
+    // Brain -> Body
+    b'L' => SetLed { value: u8 }
 }
 
 // pub struct StructVisitor<'de, T: Deserialize<'de>>(PhantomData<T>);
