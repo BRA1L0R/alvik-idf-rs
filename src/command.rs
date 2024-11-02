@@ -46,9 +46,9 @@ macro_rules! impl_message {
                         $idx => {
                             #[derive(Deserialize)]
                             struct Helper {
-                                $(
-                                    $field: $type,
-                                )+
+                            $(
+                                $field: $type,
+                            )+
                             }
 
                             let Helper { $($field),+ } = seq.next_element()?.unwrap();
@@ -77,7 +77,7 @@ macro_rules! impl_message {
                 let idx = match self {
                     Self::Unknown(_) => unreachable!(),
                     $(
-                        Self::$def { .. } => $idx ,
+                    Self::$def { .. } => $idx ,
                     )+
                 };
 
@@ -87,15 +87,15 @@ macro_rules! impl_message {
                 match self {
                     Self::Unknown(_) => unreachable!(),
                     $(
-                        Self::$def { $($field),+ } => {
-                            #[derive(Serialize)]
-                            struct Helper<'a> {
-                                $($field: &'a $type),+
-                            }
+                    Self::$def { $($field),+ } => {
+                        #[derive(Serialize)]
+                        struct Helper<'a> {
+                            $($field: &'a $type),+
+                        }
 
-                            let helper = Helper { $($field),+ };
-                            tuple.serialize_element(&helper)?;
-                        },
+                        let helper = Helper { $($field),+ };
+                        tuple.serialize_element(&helper)?;
+                    },
                     )+
                 };
 
