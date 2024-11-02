@@ -1,64 +1,16 @@
-use std::{convert::Infallible, marker::PhantomData, sync::Arc, thread::JoinHandle};
+pub mod channel;
 
-use embassy_sync::channel::{Channel, TrySendError};
+use std::{convert::Infallible, thread::JoinHandle};
+
+use channel::{AlvikChannel, Rx, Tx};
 use esp_idf_svc::hal::{
-    task::{block_on, embassy_sync::EspRawMutex},
+    task::block_on,
     uart::{AsyncUartDriver, UartDriver},
 };
 use futures::future::join;
 use ucpack::UcPack;
 
 use crate::{command::Message, AlvikError};
-
-pub struct Rx(());
-pub struct Tx(());
-pub struct AlvikChannel<End> {
-    inner: Arc<Channel<EspRawMutex, Message, 50>>,
-    _end: PhantomData<End>,
-}
-
-impl AlvikChannel<()> {
-    pub fn bound<const N: usize>() -> (AlvikChannel<Tx>, AlvikChannel<Rx>) {
-        let channel = Arc::new(Channel::<EspRawMutex, Message, 50>::new());
-
-        let write: AlvikChannel<Tx> = AlvikChannel {
-            inner: channel.clone(),
-            _end: PhantomData::default(),
-        };
-
-        let read: AlvikChannel<Rx> = AlvikChannel {
-            inner: channel,
-            _end: PhantomData::default(),
-        };
-
-        (write, read)
-    }
-}
-
-impl AlvikChannel<Rx> {
-    pub async fn recv(&self) -> Message {
-        self.inner.receive().await
-    }
-}
-
-impl AlvikChannel<Tx> {
-    pub fn try_send(&self, message: Message) -> Result<(), TrySendError<Message>> {
-        self.inner.try_send(message)
-    }
-
-    pub async fn send(&self, message: Message) {
-        self.inner.send(message).await
-    }
-}
-
-impl Clone for AlvikChannel<Tx> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            _end: Default::default(),
-        }
-    }
-}
 
 pub struct AlvikSerial {
     _handle: JoinHandle<()>,

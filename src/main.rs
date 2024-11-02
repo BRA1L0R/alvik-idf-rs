@@ -12,7 +12,10 @@ use esp_idf_svc::{
     sys::EspError,
 };
 use interface::AlvikInterface;
-use serial::{AlvikChannel, AlvikSerial, Rx};
+use serial::{
+    channel::{AlvikChannel, Rx},
+    AlvikSerial,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,6 +25,8 @@ enum AlvikError {
     #[error("esp error: {0}")]
     Esp(#[from] EspError),
 }
+
+pub struct State {}
 
 struct AlvikDriver {
     pub nrst: PinDriver<'static, AnyIOPin, InputOutput>,
@@ -41,6 +46,7 @@ impl AlvikDriver {
         check.set_pull(Pull::Down).unwrap();
 
         if check.is_low() {
+            log::error!("Alvik is offline!");
             return Err(AlvikError::Offline);
         };
 
