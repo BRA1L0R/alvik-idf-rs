@@ -1,16 +1,21 @@
 pub mod command;
+pub mod dispatcher;
 pub mod interface;
 pub mod serial;
 
-use std::time::Duration;
-
-use esp_idf_svc::{
-    hal::{
-        gpio::{AnyIOPin, InputOutput, PinDriver},
-        prelude::Peripherals,
+use std::{
+    ops::ControlFlow,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
     },
-    sys::EspError,
+    time::Duration,
 };
+
+use command::Message;
+use dispatcher::Handler;
+use esp_idf_svc::{hal::prelude::Peripherals, mqtt::client::Event, sys::EspError};
+use futures::executor::block_on;
 use interface::AlvikInterface;
 use serial::{
     channel::{AlvikChannel, Rx},
@@ -26,12 +31,53 @@ enum AlvikError {
     Esp(#[from] EspError),
 }
 
-pub struct State {}
+struct AlvikBuilder<H: Handler<Message>> {
+    interface: AlvikInterface,
+    // subscribers: Vec<DynSubscriber>,
+    handler: H,
+}
+
+impl AlvikBuilder<()> {
+    fn new(interface: AlvikInterface) -> Self {
+        AlvikBuilder {
+            interface,
+            handler: (),
+        }
+    }
+}
+
+impl<H: Handler<Message> + Send + 'static> AlvikBuilder<H> {
+    pub fn subscribe<S>(self, handler: S) -> AlvikBuilder<impl Handler<Message>>
+    where
+        S: Handler<Message> + Send + 'static,
+    {
+        use dispatcher::HandlerExt;
+        let new_handler = self.handler.chain_to(handler);
+
+        AlvikBuilder {
+            interface: self.interface,
+            handler: new_handler,
+        }
+    }
+
+    fn build(self) -> Result<AlvikDriver, AlvikError> {
+        // AlvikDriver::begin(self.interface, self.subscribers)
+        AlvikDriver::begin(self.interface, self.handler)
+    }
+}
 
 struct AlvikDriver {
-    pub nrst: PinDriver<'static, AnyIOPin, InputOutput>,
-    pub check: PinDriver<'static, AnyIOPin, InputOutput>,
+    // pub nrst: PinDriver<'static, AnyIOPin, InputOutput>,
+    // pub check: PinDriver<'static, AnyIOPin, InputOutput>,
     serial: AlvikSerial,
+    // subscribers: Vec<Box<dyn Subscriber>>,
+}
+
+async fn dispatcher(rx: AlvikChannel<Rx>, subscribers: impl Handler<Message>) {
+    loop {
+        let message = rx.recv().await;
+        subscribers.handle_event(message);
+    }
 }
 
 impl AlvikDriver {
@@ -41,6 +87,7 @@ impl AlvikDriver {
             mut check,
             uart,
         }: AlvikInterface,
+        subscribers: impl Handler<Message> + Send + 'static,
     ) -> Result<Self, AlvikError> {
         use esp_idf_svc::hal::gpio::Pull;
         check.set_pull(Pull::Down).unwrap();
@@ -51,19 +98,17 @@ impl AlvikDriver {
         };
 
         // reset alvik
-        nrst.set_low().unwrap();
+        nrst.set_low()?;
         std::thread::sleep(Duration::from_millis(200));
-        nrst.set_high().unwrap();
+        nrst.set_high()?;
         std::thread::sleep(Duration::from_millis(200));
 
         let mut serial = AlvikSerial::spawn(uart);
-        let receiver: AlvikChannel<Rx> = serial.take_receiver().unwrap();
+        let receiver = serial.take_receiver().unwrap();
 
-        Ok(Self {
-            nrst,
-            check,
-            serial,
-        })
+        std::thread::spawn(move || block_on(dispatcher(receiver, subscribers)));
+
+        Ok(Self { serial })
     }
 }
 
@@ -86,7 +131,57 @@ fn main() {
         peripherals.pins.gpio44,
     )
     .unwrap();
-    let driver = AlvikDriver::begin(interface).unwrap();
 
-    log::info!("Driver started!");
+    #[derive(Default)]
+    struct IMU {
+        x: AtomicU32,
+        y: AtomicU32,
+        z: AtomicU32,
+    }
+
+    impl IMU {
+        fn get(&self) -> (f32, f32, f32) {
+            let x = self.x.load(Ordering::Relaxed).to_le_bytes();
+            let y = self.y.load(Ordering::Relaxed).to_le_bytes();
+            let z = self.z.load(Ordering::Relaxed).to_le_bytes();
+
+            (
+                f32::from_le_bytes(x),
+                f32::from_le_bytes(y),
+                f32::from_le_bytes(z),
+            )
+        }
+    }
+
+    impl Handler<Message> for IMU {
+        fn handle_event(&self, event: Message) -> ControlFlow<(), Message> {
+            let Message::ImuPosition { roll, pitch, yaw } = event else {
+                return ControlFlow::Continue(event);
+            };
+
+            self.x
+                .store(u32::from_le_bytes(roll.to_le_bytes()), Ordering::Relaxed);
+            self.y
+                .store(u32::from_le_bytes(pitch.to_le_bytes()), Ordering::Relaxed);
+            self.z
+                .store(u32::from_le_bytes(yaw.to_le_bytes()), Ordering::Relaxed);
+
+            ControlFlow::Break(())
+        }
+    }
+
+    let imu = Arc::new(IMU::default());
+    AlvikBuilder::new(interface)
+        .subscribe(imu.clone())
+        .build()
+        .unwrap();
+
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let data = imu.get();
+
+        println!("{data:?}");
+    }
+
+    // log::info!("Driver started!");
 }

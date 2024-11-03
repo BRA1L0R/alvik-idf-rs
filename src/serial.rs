@@ -108,12 +108,4 @@ impl AlvikSerial {
     pub fn take_receiver(&mut self) -> Option<AlvikChannel<Rx>> {
         self.recv_channel.take()
     }
-
-    // fn sender_owned(&self) -> AlvikChannel {
-    //     self.send_channel.clon
-    // }
-
-    // fn receiver(&self) -> AlvikChannel {
-    //     self.recv_channel.clone()
-    // }
 }
