@@ -171,6 +171,7 @@ fn main() {
     }
 
     let imu = Arc::new(IMU::default());
+
     AlvikBuilder::new(interface)
         .subscribe(imu.clone())
         .build()
